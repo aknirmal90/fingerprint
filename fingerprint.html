@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Merkle Science – Extreme Entropy Fingerprint (Hash + Properties)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px;
+      line-height: 1.5;
+    }
+    .box {
+      padding: 12px;
+      background: #f3f3f3;
+      border-radius: 8px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin-top: 20px;
+    }
+    h2, h3 {
+      margin-bottom: 0.4rem;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Merkle Science — Extreme Entropy Fingerprint</h2>
+<p>
+  This page collects a high-entropy browser fingerprint (WebGL, canvas, audio, feature flags, fonts, CSS/media queries, permissions, etc.),
+  then computes a SHA-256 hash of the entire fingerprint object.
+</p>
+
+<h3>Fingerprint Hash (SHA-256)</h3>
+<div id="fpHash" class="box">Generating...</div>
+
+<h3>Fingerprint Properties (JSON)</h3>
+<div id="fpProps" class="box">Collecting...</div>
+
+<script>
+/* ============================================================
+   Helper: SHA-256
+   ============================================================ */
+async function sha256(str) {
+  const data = new TextEncoder().encode(str);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(hash)]
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/* ============================================================
+   Canvas Fingerprint – multi-scene, text, gradients, shapes
+   ============================================================ */
+function getCanvasFingerprint() {
+  try {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = 800;
+    canvas.height = 200;
+
+    // Background gradient
+    const grad = ctx.createLinearGradient(0, 0, 800, 0);
+    grad.addColorStop(0, "#f60");
+    grad.addColorStop(0.5, "#0f0");
+    grad.addColorStop(1, "#06c");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 800, 200);
+
+    // Text with shadows and composite ops
+    ctx.globalCompositeOperation = "multiply";
+    ctx.fillStyle = "#fff";
+    ctx.font = "24px 'Arial'";
+    ctx.textBaseline = "top";
+    ctx.shadowColor = "#000";
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    ctx.fillText("MerkleScience Extreme Entropy Fingerprint", 10, 10);
+
+    // Shape with different composite mode
+    ctx.globalCompositeOperation = "screen";
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(400, 120, 60, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+    ctx.fill();
+
+    // Sample some pixel data
+    const data = ctx.getImageData(10, 10, 200, 50).data;
+    let sample = [];
+    for (let i = 0; i < data.length; i += 40) {
+      sample.push(data[i]); // red channel
+    }
+
+    return {
+      dataUrl: canvas.toDataURL(),
+      sample: sample.slice(0, 50)
+    };
+  } catch {
+    return { error: "canvas-failed" };
+  }
+}
+
+/* ============================================================
+   WebGL Fingerprint – vendor, renderer, caps, limits, extensions
+   ============================================================ */
+function getWebGLFingerprint() {
+  const result = { supported: false };
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+    if (!gl) return result;
+
+    result.supported = true;
+
+    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+    result.vendor = dbg
+      ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)
+      : gl.getParameter(gl.VENDOR);
+    result.renderer = dbg
+      ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
+      : gl.getParameter(gl.RENDERER);
+
+    result.version = gl.getParameter(gl.VERSION);
+    result.shadingLanguageVersion = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+
+    function safeGetParam(p) {
+      try { return gl.getParameter(p); } catch { return null; }
+    }
+
+    result.caps = {
+      maxTextureSize: safeGetParam(gl.MAX_TEXTURE_SIZE),
+      maxCubeMapSize: safeGetParam(gl.MAX_CUBE_MAP_TEXTURE_SIZE),
+      maxRenderBufferSize: safeGetParam(gl.MAX_RENDERBUFFER_SIZE),
+      maxVertexAttribs: safeGetParam(gl.MAX_VERTEX_ATTRIBS),
+      maxVertexTextureImageUnits: safeGetParam(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS),
+      maxTextureImageUnits: safeGetParam(gl.MAX_TEXTURE_IMAGE_UNITS),
+      maxFragmentUniformVectors: safeGetParam(gl.MAX_FRAGMENT_UNIFORM_VECTORS),
+      maxVertexUniformVectors: safeGetParam(gl.MAX_VERTEX_UNIFORM_VECTORS),
+      aliasedLineWidthRange: safeGetParam(gl.ALIASED_LINE_WIDTH_RANGE),
+      aliasedPointSizeRange: safeGetParam(gl.ALIASED_POINT_SIZE_RANGE),
+      depthBits: safeGetParam(gl.DEPTH_BITS),
+      stencilBits: safeGetParam(gl.STENCIL_BITS),
+      maxViewportDims: safeGetParam(gl.MAX_VIEWPORT_DIMS)
+    };
+
+    // Anisotropic filtering
+    const extAniso = gl.getExtension("EXT_texture_filter_anisotropic")
+      || gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic")
+      || gl.getExtension("MOZ_EXT_texture_filter_anisotropic");
+    if (extAniso) {
+      result.anisotropy = {
+        maxAnisotropy: gl.getParameter(extAniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)
+      };
+    } else {
+      result.anisotropy = { maxAnisotropy: null };
+    }
+
+    // Precision formats
+    function getPrecision(shader, precisionType) {
+      try {
+        const info = gl.getShaderPrecisionFormat(shader, precisionType);
+        return info ? {
+          rangeMin: info.rangeMin,
+          rangeMax: info.rangeMax,
+          precision: info.precision
+        } : null;
+      } catch {
+        return null;
+      }
+    }
+
+    result.precision = {
+      vertLowFloat: getPrecision(gl.VERTEX_SHADER, gl.LOW_FLOAT),
+      vertMedFloat: getPrecision(gl.VERTEX_SHADER, gl.MEDIUM_FLOAT),
+      vertHighFloat: getPrecision(gl.VERTEX_SHADER, gl.HIGH_FLOAT),
+      fragLowFloat: getPrecision(gl.FRAGMENT_SHADER, gl.LOW_FLOAT),
+      fragMedFloat: getPrecision(gl.FRAGMENT_SHADER, gl.MEDIUM_FLOAT),
+      fragHighFloat: getPrecision(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT)
+    };
+
+    // Extensions
+    const exts = gl.getSupportedExtensions() || [];
+    result.extensions = exts.slice().sort();
+
+    return result;
+  } catch {
+    return result;
+  }
+}
+
+/* ============================================================
+   Audio Fingerprint – extended sample
+   ============================================================ */
+async function getAudioFingerprint() {
+  try {
+    const AudioCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!AudioCtx) return { error: "offline-audio-not-supported" };
+
+    const ctx = new AudioCtx(1, 44100, 44100);
+    const osc = ctx.createOscillator();
+    const comp = ctx.createDynamicsCompressor();
+
+    osc.type = "triangle";
+    osc.frequency.value = 10000;
+
+    comp.threshold.value = -50;
+    comp.knee.value = 40;
+    comp.ratio.value = 12;
+    comp.attack.value = 0;
+    comp.release.value = 0.25;
+
+    osc.connect(comp);
+    comp.connect(ctx.destination);
+    osc.start(0);
+
+    const buffer = await ctx.startRendering();
+    const data = buffer.getChannelData(0);
+    const len = data.length;
+
+    const sample = [];
+    for (let i = 0; i < 1000; i += 25) {
+      sample.push(data[i].toFixed(5));
+    }
+
+    let min = 1, max = -1, sum = 0;
+    for (let i = 0; i < len; i += 500) {
+      const v = data[i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+      sum += v;
+    }
+    const avg = sum / (len / 500);
+
+    return {
+      sample,
+      min: min.toFixed(5),
+      max: max.toFixed(5),
+      avg: avg.toFixed(5)
+    };
+  } catch {
+    return { error: "audio-error" };
+  }
+}
+
+/* ============================================================
+   Fonts Detection (large set)
+   ============================================================ */
+function detectFonts() {
+  const baseFonts = ["monospace", "sans-serif", "serif"];
+  const testFonts = [
+    "Arial", "Verdana", "Times New Roman", "Courier New", "Georgia",
+    "Trebuchet MS", "Comic Sans MS", "Impact", "Helvetica", "Tahoma",
+    "Palatino", "Garamond", "Bookman", "Candara", "Calibri",
+    "Franklin Gothic Medium", "Gill Sans", "Lucida Bright", "Lucida Console",
+    "Lucida Sans Unicode", "Segoe UI", "Segoe UI Emoji", "Segoe UI Symbol",
+    "MS Gothic", "MS PGothic", "Yu Gothic", "Malgun Gothic", "Meiryo",
+    "SimSun", "SimHei", "PMingLiU", "MingLiU", "Batang", "Gulim",
+    "Roboto", "Open Sans", "Lato", "Montserrat", "Source Sans Pro",
+    "Noto Sans", "Noto Serif", "Fira Sans", "Inconsolata", "Ubuntu",
+    "Droid Sans", "Droid Serif", "PT Sans", "PT Serif"
+  ];
+
+  const detected = [];
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return { detectedFonts: [] };
+
+  function textWidth(fontFamily) {
+    ctx.font = "72px " + fontFamily;
+    return ctx.measureText("mmmmmmmmmmlli").width;
+  }
+
+  const defaultWidths = {};
+  baseFonts.forEach(base => {
+    defaultWidths[base] = textWidth(base);
+  });
+
+  testFonts.forEach(font => {
+    let found = false;
+    for (const base of baseFonts) {
+      const baseWidth = defaultWidths[base];
+      const testWidth = textWidth(font + ", " + base);
+      if (testWidth !== baseWidth) {
+        found = true;
+        break;
+      }
+    }
+    if (found) detected.push(font);
+  });
+
+  return { detectedFonts: detected.sort() };
+}
+
+/* ============================================================
+   navigator.userAgentData (Client Hints)
+   ============================================================ */
+async function getUserAgentData() {
+  const out = {
+    brands: [],
+    mobile: null,
+    platform: null,
+    architecture: null,
+    model: null,
+    uaFullVersion: null,
+    platformVersion: null,
+    bitness: null
+  };
+  try {
+    const uaData = navigator.userAgentData;
+    if (!uaData) return out;
+
+    out.mobile = uaData.mobile;
+    out.platform = uaData.platform;
+
+    if (uaData.brands) {
+      out.brands = uaData.brands.map(b => ({
+        brand: b.brand,
+        version: b.version
+      }));
+    }
+
+    if (uaData.getHighEntropyValues) {
+      const high = await uaData.getHighEntropyValues([
+        "architecture",
+        "model",
+        "platformVersion",
+        "uaFullVersion",
+        "bitness"
+      ]);
+      out.architecture = high.architecture || null;
+      out.model = high.model || null;
+      out.uaFullVersion = high.uaFullVersion || null;
+      out.platformVersion = high.platformVersion || null;
+      out.bitness = high.bitness || null;
+    }
+  } catch {
+    // ignore
+  }
+  return out;
+}
+
+/* ============================================================
+   Environment / Preferences / Media Queries
+   ============================================================ */
+function getEnvInfo() {
+  const dtf = Intl.DateTimeFormat().resolvedOptions();
+  const mq = (q) => window.matchMedia(q).matches;
+
+  const prefersReducedMotion = mq("(prefers-reduced-motion: reduce)");
+  const prefersDark = mq("(prefers-color-scheme: dark)");
+
+  const colorGamut =
+    mq("(color-gamut: p3)") ? "p3" :
+    mq("(color-gamut: rec2020)") ? "rec2020" :
+    "srgb";
+
+  const prefersMoreContrast = mq("(prefers-contrast: more)");
+  const prefersLessContrast = mq("(prefers-contrast: less)");
+  const contrast = prefersMoreContrast
+    ? "more"
+    : prefersLessContrast
+      ? "less"
+      : "no-preference";
+
+  const forcedColors = mq("(forced-colors: active)") ? "active" : "none";
+
+  const pointerType =
+    mq("(pointer: fine)") ? "fine" :
+    mq("(pointer: coarse)") ? "coarse" :
+    mq("(pointer: none)") ? "none" :
+    "unknown";
+
+  const hover =
+    mq("(hover: hover)") ? "hover" :
+    mq("(hover: none)") ? "none" :
+    "unknown";
+
+  const isTouchDevice = ("ontouchstart" in window) || (navigator.maxTouchPoints || 0) > 0;
+
+  const rawPlatform = (navigator.platform || "").toLowerCase();
+  let platformGroup = "other";
+  if (rawPlatform.includes("mac")) platformGroup = "mac";
+  else if (rawPlatform.includes("win")) platformGroup = "windows";
+  else if (rawPlatform.includes("linux")) platformGroup = "linux";
+  else if (rawPlatform.includes("iphone") || rawPlatform.includes("ipad")) platformGroup = "ios";
+  else if (rawPlatform.includes("android")) platformGroup = "android";
+
+  const mqSet = {
+    reducedData: mq("(prefers-reduced-data: reduce)"),
+    invertedColors: mq("(inverted-colors: inverted)"),
+    highDynamicRange: mq("(dynamic-range: high)"),
+    minWidth800: mq("(min-width: 800px)"),
+    minHeight600: mq("(min-height: 600px)"),
+    landscape: mq("(orientation: landscape)"),
+    portrait: mq("(orientation: portrait)")
+  };
+
+  return {
+    timezoneOffset: new Date().getTimezoneOffset(),
+    timezone: dtf.timeZone || "unknown",
+    locale: navigator.language || "unknown",
+    locales: (navigator.languages || []).join(","),
+    platform: navigator.platform || "unknown",
+    platformGroup,
+    hardwareConcurrency: navigator.hardwareConcurrency || 0,
+    deviceMemory: navigator.deviceMemory || 0,
+    maxTouchPoints: navigator.maxTouchPoints || 0,
+    isTouchDevice,
+    reducedMotion: prefersReducedMotion,
+    darkMode: prefersDark,
+    colorGamut,
+    contrast,
+    forcedColors,
+    pointerType,
+    hover,
+    mediaQueries: mqSet
+  };
+}
+
+/* ============================================================
+   Storage capability flags
+   ============================================================ */
+function getStorageFlags() {
+  function safeLocal() {
+    try {
+      const k = "__ms_ls__";
+      localStorage.setItem(k, "1");
+      localStorage.removeItem(k);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function safeSession() {
+    try {
+      const k = "__ms_ss__";
+      sessionStorage.setItem(k, "1");
+      sessionStorage.removeItem(k);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function safeIndexed() {
+    try { return !!window.indexedDB; } catch { return false; }
+  }
+  function safeOpenDB() {
+    try { return !!window.openDatabase; } catch { return false; }
+  }
+
+  return {
+    localStorage: safeLocal(),
+    sessionStorage: safeSession(),
+    indexedDB: safeIndexed(),
+    openDatabase: safeOpenDB()
+  };
+}
+
+/* ============================================================
+   Feature Flags / API Support
+   ============================================================ */
+function getFeatureFlags() {
+  const flags = {};
+  const has = (o, k) => k in o;
+
+  // Core
+  flags.webRTC = has(window, "RTCPeerConnection") || has(window, "webkitRTCPeerConnection");
+  flags.webSocket = has(window, "WebSocket");
+  flags.webAssembly = typeof WebAssembly === "object";
+  flags.webGL = (function () {
+    try {
+      const c = document.createElement("canvas");
+      return !!(c.getContext("webgl") || c.getContext("experimental-webgl"));
+    } catch {
+      return false;
+    }
+  })();
+  flags.offscreenCanvas = typeof OffscreenCanvas !== "undefined";
+  flags.webGPU = has(navigator, "gpu");
+
+  // Media
+  flags.audioContext = has(window, "AudioContext") || has(window, "webkitAudioContext");
+  flags.mediaDevices = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  flags.mediaSession = has(navigator, "mediaSession");
+  flags.pictureInPicture = has(document, "pictureInPictureEnabled");
+
+  // Device / sensors
+  flags.bluetooth = has(navigator, "bluetooth");
+  flags.usb = has(navigator, "usb");
+  flags.serial = has(navigator, "serial");
+  flags.hid = has(navigator, "hid");
+  flags.vibrate = has(navigator, "vibrate");
+  flags.gamepad = has(navigator, "getGamepads");
+  flags.pointerEvents = has(window, "PointerEvent");
+  flags.geolocation = !!navigator.geolocation;
+  flags.deviceOrientation = has(window, "DeviceOrientationEvent");
+  flags.deviceMotion = has(window, "DeviceMotionEvent");
+
+  // Workers / concurrency
+  flags.sharedWorker = has(window, "SharedWorker");
+  flags.worker = has(window, "Worker");
+  flags.broadcastChannel = has(window, "BroadcastChannel");
+  flags.serviceWorker = "serviceWorker" in navigator;
+  flags.notifications = has(window, "Notification");
+
+  // Clipboard / input / credentials
+  flags.clipboard = !!navigator.clipboard;
+  flags.keyboard = has(navigator, "keyboard");
+  flags.virtualKeyboard = has(navigator, "virtualKeyboard");
+  flags.share = has(navigator, "share");
+  flags.credentials = has(navigator, "credentials");
+
+  // Intl
+  flags.intlRelativeTime = !!Intl.RelativeTimeFormat;
+  flags.intlListFormat = !!Intl.ListFormat;
+  flags.intlLocale = !!Intl.Locale;
+  flags.intlDisplayNames = !!Intl.DisplayNames;
+
+  // Observers
+  flags.performanceObserver = has(window, "PerformanceObserver");
+  flags.resizeObserver = has(window, "ResizeObserver");
+  flags.intersectionObserver = has(window, "IntersectionObserver");
+  flags.mutationObserver = has(window, "MutationObserver");
+
+  // CSS feature tests
+  if (window.CSS && CSS.supports) {
+    flags.css = {
+      grid: CSS.supports("display", "grid"),
+      flex: CSS.supports("display", "flex"),
+      subgrid: CSS.supports("display", "subgrid"),
+      sticky: CSS.supports("position", "sticky"),
+      backdropFilter: CSS.supports("backdrop-filter", "blur(5px)"),
+      containerQueries: CSS.supports("container-type", "inline-size"),
+      aspectRatio: CSS.supports("aspect-ratio", "1 / 1"),
+      scrollSnap: CSS.supports("scroll-snap-type", "x mandatory"),
+      colorFunction: CSS.supports("color", "color(display-p3 1 0.5 0)"),
+      hasSelector: CSS.supports("selector(:has(*))"),
+      focusVisible: CSS.supports("selector(:focus-visible)"),
+      gap: CSS.supports("gap", "10px")
+    };
+  } else {
+    flags.css = null;
+  }
+
+  // Passive event listeners
+  flags.passiveEventListeners = (function () {
+    let passiveSupported = false;
+    try {
+      const options = Object.defineProperty({}, "passive", {
+        get() { passiveSupported = true; }
+      });
+      window.addEventListener("testPassive", null, options);
+      window.removeEventListener("testPassive", null, options);
+    } catch {
+      passiveSupported = false;
+    }
+    return passiveSupported;
+  })();
+
+  // Simple adblock heuristic
+  flags.adBlockLike = (function () {
+    const test = document.createElement("div");
+    test.className = "adsbox";
+    test.style.height = "10px";
+    document.body.appendChild(test);
+    const blocked =
+      getComputedStyle(test).display === "none" ||
+      test.offsetHeight === 0;
+    document.body.removeChild(test);
+    return blocked;
+  })();
+
+  return flags;
+}
+
+/* ============================================================
+   Permissions Fingerprint
+   ============================================================ */
+async function getPermissionsInfo() {
+  const info = {};
+  if (!navigator.permissions || !navigator.permissions.query) {
+    return { supported: false };
+  }
+  const names = [
+    "geolocation",
+    "notifications",
+    "push",
+    "midi",
+    "camera",
+    "microphone",
+    "background-sync",
+    "ambient-light-sensor",
+    "accelerometer",
+    "gyroscope",
+    "magnetometer",
+    "clipboard-read",
+    "clipboard-write",
+    "payment-handler",
+    "persistent-storage"
+  ];
+
+  info.supported = true;
+  info.states = {};
+
+  for (const name of names) {
+    try {
+      const status = await navigator.permissions.query({ name });
+      info.states[name] = status.state;
+    } catch {
+      info.states[name] = "unavailable";
+    }
+  }
+  return info;
+}
+
+/* ============================================================
+   WebGPU Fingerprint
+   ============================================================ */
+async function getWebGPUInfo() {
+  if (!navigator.gpu) return { supported: false };
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) return { supported: false };
+    const info = await adapter.requestAdapterInfo?.();
+    const limits = adapter.limits || {};
+
+    return {
+      supported: true,
+      vendor: info?.vendor || null,
+      architecture: info?.architecture || null,
+      device: info?.device || null,
+      description: info?.description || null,
+      limits: {
+        maxBindGroups: limits.maxBindGroups,
+        maxDynamicUniformBuffersPerPipelineLayout: limits.maxDynamicUniformBuffersPerPipelineLayout,
+        maxDynamicStorageBuffersPerPipelineLayout: limits.maxDynamicStorageBuffersPerPipelineLayout,
+        maxSampledTexturesPerShaderStage: limits.maxSampledTexturesPerShaderStage,
+        maxSamplersPerShaderStage: limits.maxSamplersPerShaderStage
+      }
+    };
+  } catch {
+    return { supported: false };
+  }
+}
+
+/* ============================================================
+   Main Fingerprint Collector
+   ============================================================ */
+async function collectFingerprintObject() {
+  const [uaData, audioFp, permissions, webgpu] = await Promise.all([
+    getUserAgentData(),
+    getAudioFingerprint(),
+    getPermissionsInfo(),
+    getWebGPUInfo()
+  ]);
+
+  const canvasFp = getCanvasFingerprint();
+  const webglFp = getWebGLFingerprint();
+  const env = getEnvInfo();
+  const storageFlags = getStorageFlags();
+  const features = getFeatureFlags();
+  const fonts = detectFonts();
+
+  const fp = {
+    navigatorCore: {
+      userAgent: navigator.userAgent || "",
+      appName: navigator.appName || "",
+      appVersion: navigator.appVersion || "",
+      platform: navigator.platform || "",
+      product: navigator.product || "",
+      productSub: navigator.productSub || "",
+      vendor: navigator.vendor || "",
+      vendorSub: navigator.vendorSub || "",
+      language: navigator.language || "",
+      languages: (navigator.languages || []).join(","),
+      doNotTrack: navigator.doNotTrack || "unspecified",
+      cookieEnabled: navigator.cookieEnabled,
+      webdriver: !!navigator.webdriver
+    },
+    screen: {
+      width: screen.width,
+      height: screen.height,
+      availWidth: screen.availWidth,
+      availHeight: screen.availHeight,
+      colorDepth: screen.colorDepth,
+      pixelDepth: screen.pixelDepth,
+      pixelRatio: window.devicePixelRatio
+    },
+    envInfo: env,
+    storage: storageFlags,
+    uaData,
+    webgl: webglFp,
+    canvas: canvasFp,
+    audio: audioFp,
+    features,
+    permissions,
+    webgpu,
+    fonts,
+    summary: {
+      fontCount: (fonts.detectedFonts || []).length
+    }
+  };
+
+  return fp;
+}
+
+/* ============================================================
+   MAIN – Build Extreme Entropy Fingerprint Hash & Display
+   ============================================================ */
+(async function main() {
+  const fpObject = await collectFingerprintObject();
+  const hash = await sha256(JSON.stringify(fpObject));
+
+  // Expose hash globally for app / wallet usage
+  window.MS_FINGERPRINT_HASH = hash;
+
+  // Display on page
+  document.getElementById("fpHash").textContent = hash;
+  document.getElementById("fpProps").textContent =
+    JSON.stringify(fpObject, null, 2);
+})();
+</script>
+
+</body>
+</html>
